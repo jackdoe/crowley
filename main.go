@@ -19,13 +19,13 @@ import (
 	"github.com/dgryski/go-metro"
 )
 
-func crawl(h *http.Client, url string) ([]byte, error) {
+func crawl(h *http.Client, ua, url string) ([]byte, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36")
+	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Connection", "close")
 	req.Close = true
 
@@ -66,14 +66,14 @@ func gZipData(data []byte) (compressedData []byte, err error) {
 	return
 }
 
-func downloadAndStore(h *http.Client, root, domain string) (time.Duration, int, error) {
+func downloadAndStore(h *http.Client, ua, root, domain string) (time.Duration, int, error) {
 	t0 := time.Now()
 	root = path.Join(root, fmt.Sprintf("%v", metro.Hash64Str(domain, 0)%255), fmt.Sprintf("%v", metro.Hash64Str(domain, 1024)%255), fmt.Sprintf("%v", metro.Hash64Str(domain, 2048)%255))
 	os.MkdirAll(root, 0700)
 	fn := path.Join(root, domain+".gz")
 	if _, err := os.Stat(fn); os.IsNotExist(err) {
 		fnTmp := fn + ".tmp"
-		b, err := crawl(h, "http://"+domain)
+		b, err := crawl(h, ua, "http://"+domain)
 		if err != nil {
 			return time.Since(t0), 0, err
 		}
@@ -96,8 +96,8 @@ func downloadAndStore(h *http.Client, root, domain string) (time.Duration, int, 
 	}
 }
 
-func download(h *http.Client, root, domain string) error {
-	dur, size, err := downloadAndStore(h, root, domain)
+func download(h *http.Client, ua, root, domain string) error {
+	dur, size, err := downloadAndStore(h, ua, root, domain)
 	if err != nil {
 		if err == ErrExists {
 			log.Printf("[NOK] %v exists", domain)
@@ -112,6 +112,7 @@ func download(h *http.Client, root, domain string) error {
 
 func main() {
 	root := flag.String("root", "./out", "root output dir")
+	ua := flag.String("ua", "crowley bot 1.0", "user agent")
 	nWorkers := flag.Int("n-workers", 50, "number of workers")
 	flag.Parse()
 
@@ -161,7 +162,7 @@ func main() {
 					log.Printf("%d: close received", x)
 					return
 				case dom := <-jobs:
-					download(h, *root, dom)
+					download(h, *ua, *root, dom)
 					h.CloseIdleConnections()
 				}
 			}
