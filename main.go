@@ -14,10 +14,13 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgryski/go-metro"
 )
+
+var counter = uint64(0)
 
 func crawl(h *http.Client, ua, url string) ([]byte, error) {
 	req, err := http.NewRequest("GET", url, nil)
@@ -71,41 +74,51 @@ func downloadAndStore(h *http.Client, ua, root, domain string) (time.Duration, i
 	root = path.Join(root, fmt.Sprintf("%v", metro.Hash64Str(domain, 0)%255), fmt.Sprintf("%v", metro.Hash64Str(domain, 1024)%255), fmt.Sprintf("%v", metro.Hash64Str(domain, 2048)%255))
 	os.MkdirAll(root, 0700)
 	fn := path.Join(root, domain+".gz")
-	if _, err := os.Stat(fn); os.IsNotExist(err) {
-		fnTmp := fn + ".tmp"
-		b, err := crawl(h, ua, "http://"+domain)
-		if err != nil {
-			return time.Since(t0), 0, err
-		}
-		compressed, err := gZipData(b)
-		if err != nil {
-			return time.Since(t0), 0, err
-		}
-		err = ioutil.WriteFile(fnTmp, compressed, 0700)
-		if err != nil {
-			return time.Since(t0), 0, err
-		}
-		err = os.Rename(fnTmp, fn)
-		if err != nil {
-			return time.Since(t0), 0, err
-		}
+	fnErr := path.Join(root, domain+".err")
+	if _, err := os.Stat(fnErr); os.IsNotExist(err) {
+		if _, err := os.Stat(fn); os.IsNotExist(err) {
+			fnTmp := fn + ".tmp"
+			b, err := crawl(h, ua, "http://"+domain)
+			if err != nil {
+				err = ioutil.WriteFile(fnErr, []byte(err.Error()), 0700)
+				if err != nil {
+					return time.Since(t0), 0, err
+				}
+				return time.Since(t0), 0, nil
+			}
+			compressed, err := gZipData(b)
+			if err != nil {
+				return time.Since(t0), 0, err
+			}
+			err = ioutil.WriteFile(fnTmp, compressed, 0700)
+			if err != nil {
+				return time.Since(t0), 0, err
+			}
+			err = os.Rename(fnTmp, fn)
+			if err != nil {
+				return time.Since(t0), 0, err
+			}
 
-		return time.Since(t0), len(compressed), nil
+			return time.Since(t0), len(compressed), nil
+		} else {
+			return time.Since(t0), 0, ErrExists
+		}
 	} else {
 		return time.Since(t0), 0, ErrExists
 	}
 }
 
 func download(h *http.Client, ua, root, domain string) error {
+	c := atomic.AddUint64(&counter, 1)
 	dur, size, err := downloadAndStore(h, ua, root, domain)
 	if err != nil {
 		if err == ErrExists {
-			log.Printf("[NOK] %v exists", domain)
+			log.Printf("[NOK] %d %v exists", c, domain)
 		} else {
-			log.Printf("[NOK] %v dur: %v err: %v", domain, dur, err)
+			log.Printf("[NOK] %d %v dur: %v err: %v", c, domain, dur, err)
 		}
 	} else {
-		log.Printf("[ OK] %v dur: %v, size: %d", domain, dur, size)
+		log.Printf("[ OK] %d %v dur: %v, size: %d", c, domain, dur, size)
 	}
 	return nil
 }
