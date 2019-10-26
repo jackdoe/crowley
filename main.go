@@ -18,19 +18,22 @@ import (
 	"github.com/dgryski/go-metro"
 )
 
-func crawl(url string) ([]byte, error) {
-	tr := &http.Transport{
-		DisableKeepAlives:  true,
-		DisableCompression: false,
-	}
-	h := &http.Client{Transport: tr, Timeout: 10 * time.Second}
-
-	resp, err := h.Get(url)
+func crawl(h *http.Client, url string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
 
+	req.Header.Set("User-Agent", "open-data archive crawler bot 1.0")
+	req.Header.Set("Connection", "close")
+	req.Close = true
+
+	resp, err := h.Do(req)
+	if err != nil {
+		return nil, err
+	}
 	defer resp.Body.Close()
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -62,14 +65,14 @@ func gZipData(data []byte) (compressedData []byte, err error) {
 	return
 }
 
-func downloadAndStore(root, domain string) (time.Duration, int, error) {
+func downloadAndStore(h *http.Client, root, domain string) (time.Duration, int, error) {
 	t0 := time.Now()
 	root = path.Join(root, fmt.Sprintf("%v", metro.Hash64Str(domain, 0)%255), fmt.Sprintf("%v", metro.Hash64Str(domain, 1024)%255), fmt.Sprintf("%v", metro.Hash64Str(domain, 2048)%255))
 	os.MkdirAll(root, 0700)
 	fn := path.Join(root, domain+".gz")
 	if _, err := os.Stat(fn); os.IsNotExist(err) {
 		fnTmp := fn + ".tmp"
-		b, err := crawl("http://" + domain)
+		b, err := crawl(h, "http://"+domain)
 		if err != nil {
 			return time.Since(t0), 0, err
 		}
@@ -92,8 +95,8 @@ func downloadAndStore(root, domain string) (time.Duration, int, error) {
 	}
 }
 
-func download(root, domain string) error {
-	dur, size, err := downloadAndStore(root, domain)
+func download(h *http.Client, root, domain string) error {
+	dur, size, err := downloadAndStore(h, root, domain)
 	if err != nil {
 		if err == ErrExists {
 			log.Printf("[NOK] %v exists", domain)
@@ -110,6 +113,13 @@ func main() {
 	root := flag.String("root", "./out", "root output dir")
 	nWorkers := flag.Int("n-workers", 50, "number of workers")
 	flag.Parse()
+
+	tr := &http.Transport{
+		MaxIdleConns:       1,
+		DisableKeepAlives:  true,
+		DisableCompression: false,
+	}
+	h := &http.Client{Transport: tr, Timeout: 30 * time.Second}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	jobs := make(chan string)
@@ -141,7 +151,7 @@ func main() {
 					log.Printf("%d: close received", x)
 					return
 				case dom := <-jobs:
-					download(*root, dom)
+					download(h, *root, dom)
 				}
 			}
 		}(i)
