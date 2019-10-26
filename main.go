@@ -84,7 +84,7 @@ func downloadAndStore(h *http.Client, ua, root, domain string) (time.Duration, i
 				if err != nil {
 					return time.Since(t0), 0, err
 				}
-				return time.Since(t0), 0, nil
+				return time.Since(t0), 0, err
 			}
 			compressed, err := gZipData(b)
 			if err != nil {
