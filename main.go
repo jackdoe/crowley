@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -114,13 +115,6 @@ func main() {
 	nWorkers := flag.Int("n-workers", 50, "number of workers")
 	flag.Parse()
 
-	tr := &http.Transport{
-		MaxIdleConns:       1,
-		DisableKeepAlives:  true,
-		DisableCompression: false,
-	}
-	h := &http.Client{Transport: tr, Timeout: 30 * time.Second}
-
 	scanner := bufio.NewScanner(os.Stdin)
 	jobs := make(chan string)
 
@@ -145,6 +139,22 @@ func main() {
 
 	for i := 0; i < *nWorkers; i++ {
 		go func(x int) {
+
+			tr := &http.Transport{
+				MaxIdleConns:       1,
+				DisableKeepAlives:  true,
+				DisableCompression: false,
+				Dial: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).Dial,
+				TLSHandshakeTimeout: 5 * time.Second,
+			}
+			h := &http.Client{
+				Transport: tr,
+				Timeout:   30 * time.Second,
+			}
+
 			for {
 				select {
 				case <-close:
@@ -152,6 +162,7 @@ func main() {
 					return
 				case dom := <-jobs:
 					download(h, *root, dom)
+					h.CloseIdleConnections()
 				}
 			}
 		}(i)
